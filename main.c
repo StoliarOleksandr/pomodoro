@@ -1,6 +1,7 @@
 #include "main.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 #include "display/display.h"
 #include "display/fonts.h"
@@ -10,6 +11,43 @@
 
 I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart2;
+
+
+typedef enum  
+{
+    IDLE,
+    STATE_CONFIG,
+    STATE_RUNNING,
+    STATE_PAUSED,
+    STATE_ALARM
+
+} state_t;
+
+typedef struct 
+{
+    uint8_t minutes;
+    uint8_t seconds;
+
+} time_t;
+
+static struct
+{
+    state_t state;
+    time_t curr_time;
+    time_t work_time;
+    time_t break_time;
+    time_t big_break_time;
+
+    uint8_t cycles;
+
+} _self = { 0 };
+
+volatile static struct 
+{
+    bool state;
+    bool prev_state;
+
+} _button = { 0 };
 
 void SystemClock_Config(void)
 {
@@ -90,8 +128,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
   GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
   GPIO_InitStruct.Pin = LD2_Pin;
@@ -99,6 +137,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
 }
 
 void Error_Handler(void)
@@ -122,31 +162,16 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_USART2_UART_Init();
-  
   ssd1306_Init();
 
-
-  while (1)
+  while(1)
   {
-    ssd1306_Fill(Black);
-   
-    uint32_t start = HAL_GetTick();
-    uint32_t end = start;
-    int fps = 0;
-    char message[] = "25:00";
-
-    do {
-        ssd1306_SetCursor(40, 20);
-        ssd1306_WriteString(message, Font_11x18, White);
-        ssd1306_UpdateScreen();
-       
-        end = HAL_GetTick();
-    } while((end - start) < 5000);
-   
-
-    if(HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin) == GPIO_PIN_RESET) 
-        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-    else
-        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, _button.state);
   }
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if(GPIO_Pin == B1_Pin) 
+        _button.state = HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin);
 }
