@@ -1,22 +1,14 @@
 #ifndef DISPLAY_H
 #define DISPLAY_H
 
-#include "stm32f4xx_hal.h"
-#include "stm32f4xx_hal_gpio.h"
-
-#include <_ansi.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #define DISPLAY_X_OFFSET_LOWER 0u
 #define DISPLAY_X_OFFSET_UPPER 0u
-#define DISPLAY_I2C_PORT       hi2c1
-#define DISPLAY_I2C_ADDR       (0x3C << 1u)
 #define DISPLAY_HEIGHT         64u
 #define DISPLAY_WIDTH          128u
-#define DISPLAY_BUFFER_SIZE    DISPLAY_WIDTH* DISPLAY_HEIGHT / 8u
-
-extern I2C_HandleTypeDef DISPLAY_I2C_PORT;
+#define DISPLAY_BUFFER_SIZE    (DISPLAY_WIDTH * DISPLAY_HEIGHT / 8u)
 
 typedef enum
 {
@@ -57,8 +49,10 @@ typedef struct
 
 } display_font_t;
 
+typedef void (*display_write_data_cb_t) (uint8_t mem_addr, uint8_t* buffer, size_t buffer_size);
 
 void display_init(void);
+void display_set_cb(display_write_data_cb_t cb);
 void display_fill(display_color_t color);
 void display_update(void);
 void display_draw_pixel(uint8_t x, uint8_t y, display_color_t color);

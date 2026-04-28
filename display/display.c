@@ -7,6 +7,7 @@
 static uint8_t   display_buffer[DISPLAY_BUFFER_SIZE];
 static display_t display;
 
+static display_write_data_cb_t write_data_cb = NULL;
 
 /* Convert Degrees to Radians */
 static float display_deg_to_rad(float par_deg)
@@ -33,15 +34,15 @@ static uint16_t display_normalize_to_0_360(uint16_t par_deg)
 
 void display_write_cmd(uint8_t cmd)
 {
-    HAL_I2C_Mem_Write(&DISPLAY_I2C_PORT, DISPLAY_I2C_ADDR, 0x00, 1, &cmd, 1, HAL_MAX_DELAY);
+    write_data_cb(0x00, &cmd, 1);
 }
 
 void display_write_data(uint8_t* buffer, size_t buff_size)
 {
-    HAL_I2C_Mem_Write(&DISPLAY_I2C_PORT, DISPLAY_I2C_ADDR, 0x40, 1, buffer, buff_size, HAL_MAX_DELAY);
+    write_data_cb(0x40, buffer, buff_size);
 }
 
-display_error_t displat_fill_buffer(uint8_t* buf, uint32_t len)
+display_error_t display_fill_buffer(uint8_t* buf, uint32_t len)
 {
     display_error_t ret = DISPLAY_ERR;
     if(len <= DISPLAY_BUFFER_SIZE)
@@ -52,13 +53,16 @@ display_error_t displat_fill_buffer(uint8_t* buf, uint32_t len)
     return ret;
 }
 
+void display_set_cb(display_write_data_cb_t cb)
+{
+    if(! write_data_cb)
+        write_data_cb = cb;
+}
+
+
 /* Initialize the oled screen */
 void display_init(void)
 {
-    // Reset OLED
-    // Wait for the screen to boot
-    HAL_Delay(100);
-
     // Init OLED
     display_set_on(0);  // display off
 
