@@ -1,86 +1,94 @@
 #ifndef DISPLAY_H
 #define DISPLAY_H
 
-#include <stddef.h>
-#include <stdint.h>
-#include <_ansi.h>
-
 #include "stm32f4xx_hal.h"
 #include "stm32f4xx_hal_gpio.h"
 
-#define SSD1306_X_OFFSET_LOWER 0u
-#define SSD1306_X_OFFSET_UPPER 0u
-#define SSD1306_I2C_PORT       hi2c1
-#define SSD1306_I2C_ADDR       (0x3C << 1u)
-#define SSD1306_HEIGHT         64u
-#define SSD1306_WIDTH          128u
-#define SSD1306_BUFFER_SIZE    SSD1306_WIDTH * SSD1306_HEIGHT / 8u
+#include <_ansi.h>
+#include <stddef.h>
+#include <stdint.h>
 
-extern I2C_HandleTypeDef SSD1306_I2C_PORT;
+#define DISPLAY_X_OFFSET_LOWER 0u
+#define DISPLAY_X_OFFSET_UPPER 0u
+#define DISPLAY_I2C_PORT       hi2c1
+#define DISPLAY_I2C_ADDR       (0x3C << 1u)
+#define DISPLAY_HEIGHT         64u
+#define DISPLAY_WIDTH          128u
+#define DISPLAY_BUFFER_SIZE    DISPLAY_WIDTH* DISPLAY_HEIGHT / 8u
 
-typedef enum 
+extern I2C_HandleTypeDef DISPLAY_I2C_PORT;
+
+typedef enum
 {
-    Black = 0x00, // Black color, no pixel
-    White = 0x01  // Pixel is set. Color depends on OLED
-} SSD1306_COLOR;
+    COLOR_BLACK = 0x00,  // Black color, no pixel
+    COLOR_WHITE = 0x01   // Pixel is set. Color depends on OLED
 
-typedef enum 
+} display_color_t;
+
+typedef enum
 {
-    SSD1306_OK = 0x00,
-    SSD1306_ERR = 0x01  // Generic error.
-} SSD1306_Error_t;
+    DISPLAY_OK  = 0x00,
+    DISPLAY_ERR = 0x01  // Generic error.
 
-// Struct to store transformations
-typedef struct 
+} display_error_t;
+
+typedef struct
 {
-    uint16_t CurrentX;
-    uint16_t CurrentY;
-    uint8_t Initialized;
-    uint8_t DisplayOn;
-} SSD1306_t;
-
-typedef struct {
     uint8_t x;
     uint8_t y;
-} SSD1306_VERTEX;
 
-/** Font */
-typedef struct {
-	const uint8_t width;                /**< Font width in pixels */
-	const uint8_t height;               /**< Font height in pixels */
-	const uint16_t *const data;         /**< Pointer to font data array */
-    const uint8_t *const char_width;    /**< Proportional character width in pixels (NULL for monospaced) */
-} SSD1306_Font_t;
+} display_vertex_t;
 
-// Procedure definitions
-void ssd1306_Init(void);
-void ssd1306_Fill(SSD1306_COLOR color);
-void ssd1306_UpdateScreen(void);
-void ssd1306_DrawPixel(uint8_t x, uint8_t y, SSD1306_COLOR color);
-char ssd1306_WriteChar(char ch, SSD1306_Font_t Font, SSD1306_COLOR color);
-char ssd1306_WriteString(char* str, SSD1306_Font_t Font, SSD1306_COLOR color);
-void ssd1306_SetCursor(uint8_t x, uint8_t y);
-void ssd1306_Line(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, SSD1306_COLOR color);
-void ssd1306_DrawArc(uint8_t x, uint8_t y, uint8_t radius, uint16_t start_angle, uint16_t sweep, SSD1306_COLOR color);
-void ssd1306_DrawArcWithRadiusLine(uint8_t x, uint8_t y, uint8_t radius, uint16_t start_angle, uint16_t sweep, SSD1306_COLOR color);
-void ssd1306_DrawCircle(uint8_t par_x, uint8_t par_y, uint8_t par_r, SSD1306_COLOR color);
-void ssd1306_FillCircle(uint8_t par_x,uint8_t par_y,uint8_t par_r,SSD1306_COLOR par_color);
-void ssd1306_Polyline(const SSD1306_VERTEX *par_vertex, uint16_t par_size, SSD1306_COLOR color);
-void ssd1306_DrawRectangle(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, SSD1306_COLOR color);
-void ssd1306_FillRectangle(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, SSD1306_COLOR color);
+typedef struct
+{
+    uint8_t current_x;
+    uint8_t current_y;
+    uint8_t initialized;
+    uint8_t display_on;
+
+} display_t;
+
+typedef struct
+{
+    const uint8_t         width;      /**< Font width in pixels */
+    const uint8_t         height;     /**< Font height in pixels */
+    const uint16_t* const data;       /**< Pointer to font data array */
+    const uint8_t* const  char_width; /**< Proportional character width in pixels (NULL for monospaced) */
+
+} display_font_t;
+
+
+void display_init(void);
+void display_fill(display_color_t color);
+void display_update(void);
+void display_draw_pixel(uint8_t x, uint8_t y, display_color_t color);
+char display_write_char(char ch, display_font_t font, display_color_t color);
+char display_write_string(char* str, display_font_t font, display_color_t color);
+void display_set_cursor(uint8_t x, uint8_t y);
+void display_draw_line(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, display_color_t color);
+void display_draw_arc(uint8_t x, uint8_t y, uint8_t radius, uint16_t start_angle, uint16_t sweep,
+                      display_color_t color);
+void display_draw_arc_with_radius(uint8_t x, uint8_t y, uint8_t radius, uint16_t start_angle, uint16_t sweep,
+                                  display_color_t color);
+void display_draw_circle(uint8_t x, uint8_t y, uint8_t radius, display_color_t color);
+void display_fill_circle(uint8_t x, uint8_t y, uint8_t radius, display_color_t color);
+void display_draw_polyline(const display_vertex_t* vertices, uint16_t size, display_color_t color);
+void display_draw_rectangle(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, display_color_t color);
+void display_fill_rectangle(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, display_color_t color);
 
 /**
  * @brief Invert color of pixels in rectangle (include border)
- * 
+ *
  * @param x1 X Coordinate of top left corner
  * @param y1 Y Coordinate of top left corner
  * @param x2 X Coordinate of bottom right corner
  * @param y2 Y Coordinate of bottom right corner
  * @return SSD1306_Error_t status
  */
-SSD1306_Error_t ssd1306_InvertRectangle(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2);
+display_error_t display_invert_rectangle(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2);
 
-void ssd1306_DrawBitmap(uint8_t x, uint8_t y, const unsigned char* bitmap, uint8_t w, uint8_t h, SSD1306_COLOR color);
+void display_draw_bitmap(uint8_t x, uint8_t y, const unsigned char* bitmap, uint8_t w, uint8_t h,
+                         display_color_t color);
 
 /**
  * @brief Sets the contrast of the display.
@@ -88,26 +96,25 @@ void ssd1306_DrawBitmap(uint8_t x, uint8_t y, const unsigned char* bitmap, uint8
  * @note Contrast increases as the value increases.
  * @note RESET = 7Fh.
  */
-void ssd1306_SetContrast(const uint8_t value);
+void display_set_contrast(const uint8_t value);
 
 /**
  * @brief Set Display ON/OFF.
  * @param[in] on 0 for OFF, any for ON.
  */
-void ssd1306_SetDisplayOn(const uint8_t on);
+void display_set_on(const uint8_t on);
 
 /**
  * @brief Reads DisplayOn state.
  * @return  0: OFF.
  *          1: ON.
  */
-uint8_t ssd1306_GetDisplayOn();
+uint8_t display_get_on(void);
 
+void display_write_cmd(uint8_t cmd);
 
-void ssd1306_WriteCommand(uint8_t byte);
+void display_write_data(uint8_t* buffer, size_t buff_size);
 
-void ssd1306_WriteData(uint8_t* buffer, size_t buff_size);
+display_error_t display_fill_buffer(uint8_t* buf, uint32_t len);
 
-SSD1306_Error_t ssd1306_FillBuffer(uint8_t* buf, uint32_t len);
-
-#endif // DISPLAY_H
+#endif  // DISPLAY_H
