@@ -10,7 +10,6 @@ typedef enum
     POMODORO_STATE_PAUSED,
     POMODORO_STATE_RUNNING,
     POMODORO_STATE_ALARM,
-    POMODORO_STATE_CONFIG,
 
 } pomodoro_state_t;
 
@@ -59,5 +58,12 @@ const char *pomodoro_phase_label(void);
 
 /* Number of completed focus cycles since init. */
 uint8_t pomodoro_cycle_count(void);
+
+/* Return the current runtime configuration. */
+pomodoro_cfg_t pomodoro_get_cfg(void);
+
+/* Apply new time values and return to PAUSED / Focus phase.
+ * cycles_before_big_break is preserved from the original config. */
+void pomodoro_apply_cfg(pomodoro_cfg_t cfg);
 
 #endif /* POMODORO_H */

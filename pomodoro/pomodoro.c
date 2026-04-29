@@ -14,7 +14,6 @@ static phase_t          _phase;
 static pomodoro_time_t  _curr_time;
 static uint32_t         _acc_ms;
 static uint8_t          _cycles;
-static uint8_t          _config_value; /* focus minutes being edited */
 
 static void load_phase_time(void)
 {
@@ -44,11 +43,10 @@ static void advance_phase(void)
 
 void pomodoro_init(pomodoro_cfg_t cfg)
 {
-    _cfg          = cfg;
-    _phase        = PHASE_FOCUS;
-    _cycles       = 0;
-    _acc_ms       = 0;
-    _config_value = cfg.focus_min;
+    _cfg   = cfg;
+    _phase = PHASE_FOCUS;
+    _cycles = 0;
+    _acc_ms = 0;
     load_phase_time();
     _state = POMODORO_STATE_PAUSED;
 }
@@ -93,8 +91,6 @@ pomodoro_action_t pomodoro_handle_event(button_event_t ev)
                 _acc_ms = 0;
                 return POMODORO_ACTION_DISPLAY_UPDATE;
             }
-            if(ev == BUTTON_EVENT_LONG_PRESS)
-                goto enter_config;
             break;
 
         case POMODORO_STATE_RUNNING:
@@ -103,8 +99,6 @@ pomodoro_action_t pomodoro_handle_event(button_event_t ev)
                 _state = POMODORO_STATE_PAUSED;
                 return POMODORO_ACTION_DISPLAY_UPDATE;
             }
-            if(ev == BUTTON_EVENT_LONG_PRESS)
-                goto enter_config;
             break;
 
         case POMODORO_STATE_ALARM:
@@ -115,48 +109,11 @@ pomodoro_action_t pomodoro_handle_event(button_event_t ev)
                 _acc_ms = 0;
                 return POMODORO_ACTION_DISPLAY_UPDATE;
             }
-            if(ev == BUTTON_EVENT_LONG_PRESS)
-                goto enter_config;
             break;
 
-        case POMODORO_STATE_CONFIG:
-            if(ev == BUTTON_EVENT_CLICK)
-            {
-                _config_value++;
-                if(_config_value > 60)
-                    _config_value = 1;
-                _curr_time.minutes = _config_value;
-                _curr_time.seconds = 0;
-                return POMODORO_ACTION_DISPLAY_UPDATE;
-            }
-            if(ev == BUTTON_EVENT_LONG_PRESS)
-            {
-                /* Save and return to focus */
-                _cfg.focus_min = _config_value;
-                _phase         = PHASE_FOCUS;
-                load_phase_time();
-                _state  = POMODORO_STATE_PAUSED;
-                _acc_ms = 0;
-                return POMODORO_ACTION_DISPLAY_UPDATE;
-            }
-            if(ev == BUTTON_EVENT_DOUBLE_CLICK)
-            {
-                /* Discard — restore current phase time */
-                load_phase_time();
-                _state = POMODORO_STATE_PAUSED;
-                return POMODORO_ACTION_DISPLAY_UPDATE;
-            }
-            break;
     }
 
     return POMODORO_ACTION_NONE;
-
-enter_config:
-    _config_value      = _cfg.focus_min;
-    _curr_time.minutes = _config_value;
-    _curr_time.seconds = 0;
-    _state             = POMODORO_STATE_CONFIG;
-    return POMODORO_ACTION_DISPLAY_UPDATE;
 }
 
 pomodoro_state_t pomodoro_state(void)
@@ -171,8 +128,6 @@ pomodoro_time_t pomodoro_current_time(void)
 
 const char *pomodoro_phase_label(void)
 {
-    if(_state == POMODORO_STATE_CONFIG)
-        return "Config";
     switch(_phase)
     {
         case PHASE_FOCUS:     return "Focus";
@@ -185,4 +140,20 @@ const char *pomodoro_phase_label(void)
 uint8_t pomodoro_cycle_count(void)
 {
     return _cycles;
+}
+
+pomodoro_cfg_t pomodoro_get_cfg(void)
+{
+    return _cfg;
+}
+
+void pomodoro_apply_cfg(pomodoro_cfg_t cfg)
+{
+    _cfg.focus_min     = cfg.focus_min;
+    _cfg.break_min     = cfg.break_min;
+    _cfg.big_break_min = cfg.big_break_min;
+    _phase  = PHASE_FOCUS;
+    _acc_ms = 0;
+    load_phase_time();
+    _state = POMODORO_STATE_PAUSED;
 }

@@ -29,6 +29,7 @@ add_executable(${CMAKE_PROJECT_NAME})
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     main.c
     button/button.c
+    config/config_task.c
     pomodoro/pomodoro.c
     display/display.c
     display/fonts.c

@@ -29,10 +29,11 @@ st-flash write build/pomodoro.bin 0x08000000
 |---|---|
 | Short press | Start / pause timer |
 | Short press (alarm) | Dismiss alarm, load next phase |
-| Long press (≥ 2 s) | Enter CONFIG mode |
-| Short press in CONFIG | Increment focus duration (+1 min) |
-| Long press in CONFIG | Save and return |
-| Double-click in CONFIG | Discard and return |
+| Long press (≥ 5 s) | Enter configuration mode |
+| Short press in config | Increment current duration by 1 min (wraps at 60) |
+| Double-click in config | Confirm value and advance to next step |
+
+Configuration steps in order: Focus duration → Break duration → Long Break duration.
 
 Default schedule: 25 min focus → 5 min break → big break (15 min) every 4 cycles.
 

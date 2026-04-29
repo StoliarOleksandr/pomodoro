@@ -3,6 +3,7 @@
 #include "osal/osal.h"
 
 #include "button/button.h"
+#include "config/config_task.h"
 #include "display/display.h"
 #include "display/fonts.h"
 #include "pomodoro/pomodoro.h"
@@ -13,6 +14,15 @@
 
 /* Semaphore that wakes task_display whenever a display update is needed. */
 static osal_sem_t g_display_sem;
+
+/* Semaphore that wakes task_config when long-press is detected. */
+static osal_sem_t g_config_sem;
+
+/* Queue carrying button events from task_main to task_config during config. */
+static osal_queue_t g_btn_queue;
+
+/* Set by task_main when entering config; cleared by task_config when done. */
+volatile uint8_t g_in_config;
 
 static void display_write_cb(uint8_t mem_addr, uint8_t *buf, size_t len)
 {
@@ -33,11 +43,6 @@ static void render(void)
     {
         display_set_cursor(44, 2);
         display_write_string("DONE!", font_7x10, COLOR_WHITE);
-    }
-    else if(state == POMODORO_STATE_CONFIG)
-    {
-        display_set_cursor(37, 2);
-        display_write_string("CONFIG", font_7x10, COLOR_WHITE);
     }
 
     display_set_cursor(29, 22);
@@ -67,13 +72,15 @@ static void task_display(void *arg)
         while(pomodoro_state() == POMODORO_STATE_RUNNING)
         {
             osal_delay_ms(1000);
-            render();   /* reads pomodoro_current_time() already advanced by task_main */
+            render();
         }
     }
 }
 
 /* Main logic task — polls the button and drives the pomodoro state machine.
- * Notifies task_display whenever the state machine requests a display update. */
+ * Long press routes to task_config; all other events go to the pomodoro FSM.
+ * While g_in_config is set, button events are forwarded to g_btn_queue and
+ * the pomodoro tick and display update are suppressed. */
 static void task_main(void *arg)
 {
     (void)arg;
@@ -87,30 +94,53 @@ static void task_main(void *arg)
         uint32_t elapsed = now - last_tick;
         last_tick        = now;
 
-        button_event_t    ev     = button_poll();
-        pomodoro_action_t action = POMODORO_ACTION_NONE;
+        button_event_t ev = button_poll();
 
-        if(ev != BUTTON_EVENT_NONE)
-            action |= pomodoro_handle_event(ev);
-
-        action |= pomodoro_tick(elapsed);
-
-        if(action & POMODORO_ACTION_DISPLAY_UPDATE)
-            osal_sem_give(&g_display_sem);
-
-        if(pomodoro_state() == POMODORO_STATE_ALARM)
+        if(g_in_config)
         {
-            if((now - alarm_blink_at) >= 500)
-            {
-                alarm_blink_at = now;
-                led_on ^= 1;
-                hal_gpio_write(PIN_LED, led_on);
-            }
+            if(ev != BUTTON_EVENT_NONE)
+                osal_queue_send(&g_btn_queue, &ev);
         }
-        else if(led_on)
+        else
         {
-            led_on = 0;
-            hal_gpio_write(PIN_LED, 0);
+            pomodoro_action_t action = POMODORO_ACTION_NONE;
+
+            if(ev == BUTTON_EVENT_LONG_PRESS)
+            {
+                /* Turn LED off and hand control to config task. */
+                if(led_on)
+                {
+                    led_on = 0;
+                    hal_gpio_write(PIN_LED, 0);
+                }
+                g_in_config = 1;
+                osal_sem_give(&g_config_sem);
+            }
+            else
+            {
+                if(ev != BUTTON_EVENT_NONE)
+                    action |= pomodoro_handle_event(ev);
+
+                action |= pomodoro_tick(elapsed);
+
+                if(action & POMODORO_ACTION_DISPLAY_UPDATE)
+                    osal_sem_give(&g_display_sem);
+
+                if(pomodoro_state() == POMODORO_STATE_ALARM)
+                {
+                    if((now - alarm_blink_at) >= 500)
+                    {
+                        alarm_blink_at = now;
+                        led_on ^= 1;
+                        hal_gpio_write(PIN_LED, led_on);
+                    }
+                }
+                else if(led_on)
+                {
+                    led_on = 0;
+                    hal_gpio_write(PIN_LED, 0);
+                }
+            }
         }
 
         osal_delay_ms(10);
@@ -121,7 +151,7 @@ int main(void)
 {
     platform_init();
 
-    button_cfg_t btn_cfg = {.long_press_ms = 2000, .double_click_ms = 500};
+    button_cfg_t btn_cfg = {.long_press_ms = 5000, .double_click_ms = 500};
     button_init(PIN_BUTTON, btn_cfg);
 
     pomodoro_cfg_t pom_cfg = {
@@ -145,8 +175,15 @@ int main(void)
     osal_sem_create(&g_display_sem);
     osal_sem_give(&g_display_sem);   /* trigger initial render of 25:00 */
 
+    osal_sem_create(&g_config_sem);
+    osal_queue_create(&g_btn_queue, sizeof(button_event_t), 4);
+
+    g_in_config = 0;
+    config_task_init(&g_config_sem, &g_btn_queue, &g_display_sem, &g_in_config);
+
     osal_task_create(task_display, NULL, 512, 1, "display", NULL);
     osal_task_create(task_main,    NULL, 512, 2, "main",    NULL);
+    osal_task_create(config_task,  NULL, 512, 2, "config",  NULL);
 
     osal_start();   /* never returns */
 }
