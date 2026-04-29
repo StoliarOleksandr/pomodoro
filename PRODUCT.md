@@ -1,6 +1,6 @@
 # Pomodoro — Product Overview
 
-A small, low-power physical Pomodoro timer with a monochrome OLED display and single-button input. Designed to be simple, portable (firmware), and inexpensive (hardware).
+A small physical Pomodoro timer with a monochrome OLED display and single-button input. Designed to be simple, portable (firmware), and inexpensive (hardware).
 
 ## Target users
 
@@ -15,7 +15,7 @@ A small, low-power physical Pomodoro timer with a monochrome OLED display and si
 - Automatic big-break scheduling after every 4 focus cycles.
 - Cycle counter displayed on screen.
 - On-screen "DONE!" alarm banner + LED blink when a phase completes.
-- Firmware structured for easy chip portability — only `platform/stm32f401/` is chip-specific.
+- Firmware structured for easy chip portability (`platform/`) and OS portability (`osal/`).
 
 ## Button interaction map
 
@@ -45,7 +45,7 @@ Each phase transition requires the user to dismiss the alarm with a short press.
 | MCU | STM32F401xE — Cortex-M4, 84 MHz |
 | Display | SSD1306-compatible 128×64 OLED, I2C (address 0x3C) |
 | Button | Single tactile push-button, PC13, active-LOW pull-up |
-| Alarm indicator | Onboard LED PA5, 1 Hz blink during alarm |
+| Alarm indicator | Onboard LED PA5, ~1 Hz blink during alarm |
 | Debug | USART2 @ 115200 baud (PA2/PA3) |
 | Flash/debug port | SWD (TMS PA13, TCK PA14, SWO PB3) |
 | I2C | I2C1 @ 100 kHz (SCL PB8, SDA PB9) |
@@ -53,12 +53,14 @@ Each phase transition requires the user to dismiss the alarm with a short press.
 
 ## Software / firmware
 
-- **Build system**: CMake, selectable platform via `-DPLATFORM=stm32f401`.
-- **Portable modules** (no chip headers):
+- **Build system**: CMake, selectable platform via `-DPLATFORM=stm32f401`, selectable OS backend via `-DOSAL=freertos`.
+- **RTOS**: FreeRTOS V11.1.0 (git submodule). Two tasks: `task_main` (state machine, priority 2) and `task_display` (OLED rendering, priority 1).
+- **Portable modules** (no chip or OS headers):
 
   | Module | Path | Role |
   |---|---|---|
-  | HAL interface | `hal/hal.h` | 6-function contract for all hardware access |
+  | HAL interface | `hal/hal.h` | 5-function contract for all hardware access |
+  | OSAL interface | `osal/osal.h` | OS-agnostic tasks, semaphores, queues |
   | Button | `button/` | Polling event detection |
   | Pomodoro logic | `pomodoro/` | State machine, countdown, phase/cycle tracking |
   | Display driver | `display/` | SSD1306 framebuffer + drawing API |
@@ -67,10 +69,17 @@ Each phase transition requires the user to dismiss the alarm with a short press.
 
   | File | Role |
   |---|---|
-  | `platform/stm32f401/platform.c` | Peripheral init, clock config |
+  | `platform/stm32f401/platform.c` | Peripheral init, clock config, TIM2 HAL timebase |
   | `platform/stm32f401/hal_impl.c` | Implements `hal/hal.h` via STM32 HAL |
 
-- **I2C transport**: blocking `HAL_I2C_Mem_Write` (100 ms timeout). No DMA required.
+- **OSAL module** (OS-specific, FreeRTOS):
+
+  | File | Role |
+  |---|---|
+  | `osal/freertos/osal_impl.c` | Implements `osal/osal.h` via FreeRTOS API |
+  | `osal/freertos/FreeRTOSConfig.h` | Kernel configuration for STM32F401 |
+
+- **I2C transport**: blocking `HAL_I2C_Mem_Write` (100 ms timeout), called from `task_display`. No DMA required.
 
 ## User interface
 
@@ -78,7 +87,7 @@ The 128×64 display is divided into three rows:
 
 - **Top (y = 2)**: state banner — "DONE!" during alarm, "CONFIG" during configuration, empty otherwise.
 - **Middle (y = 22)**: current countdown in `MM:SS` format, 11×18 pixel font.
-- **Bottom (y = 50)**: phase label ("Focus" / "Break" / "Big Break" / "Config") and cycle count ("Cyc:N").
+- **Bottom (y = 50)**: phase label ("Focus" / "Break" / "Big Break") and cycle count ("Cyc:N").
 
 Font sizes were chosen for maximum legibility at 128×64 resolution.
 
@@ -94,12 +103,13 @@ Font sizes were chosen for maximum legibility at 128×64 resolution.
 | Test | Expected result |
 |---|---|
 | Power-on | "Pomodoro" greeting for 2 s, then 25:00 Focus timer in PAUSED |
-| Short press | Timer starts counting down; another short press pauses it |
+| Short press | Timer starts counting down; display updates each second |
+| Short press while RUNNING | Timer pauses; display freezes |
 | Long press (≥ 2 s) | "CONFIG" banner appears; timer shows current focus duration |
 | Short press in CONFIG | Focus duration increments by 1 min on each press |
 | Long press in CONFIG | Returns to PAUSED with updated focus duration |
 | Double-click in CONFIG | Returns to PAUSED with original duration (no change) |
-| Timer reaches 00:00 | "DONE!" banner appears, LED blinks at 1 Hz |
+| Timer reaches 00:00 | "DONE!" banner appears, LED blinks at ~1 Hz |
 | Short press on alarm | Loads next phase (Break or Big Break), returns to PAUSED |
 | After 4 focus cycles | Big Break (15 min) is loaded instead of regular Break |
 | Full display refresh | No corruption, no frozen pixels |
@@ -114,6 +124,6 @@ Font sizes were chosen for maximum legibility at 128×64 resolution.
 
 - Configurable break and big-break durations from the CONFIG UI.
 - Audible alarm via a piezo buzzer (requires hardware addition).
-- Low-power sleep between events (RTC wakeup is already wired, init disabled).
+- Low-power sleep between events (RTC wakeup is available in hardware; init currently disabled).
 - BLE integration for remote monitoring or mobile app sync.
 - Battery level indicator (requires ADC + voltage divider).

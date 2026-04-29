@@ -47,5 +47,9 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 add_subdirectory(platform/${PLATFORM})
 
+# OSAL — create osal/<name>/CMakeLists.txt to add a new OS backend.
+set(OSAL "freertos" CACHE STRING "OS backend (subdirectory under osal/)")
+add_subdirectory(osal/${OSAL})
+
 # Workaround: some toolchains inject a spurious 'ob' library dependency.
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)

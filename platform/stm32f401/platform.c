@@ -76,6 +76,28 @@ static void MX_GPIO_Init(void)
     HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 }
 
+/* Override weak HAL timebase to use TIM2 instead of SysTick.
+ * SysTick is reserved for the FreeRTOS kernel tick. */
+HAL_StatusTypeDef HAL_InitTick(uint32_t TickPriority)
+{
+    __HAL_RCC_TIM2_CLK_ENABLE();
+
+    /* TIM2 clock = APB1 timer clock = 2 × PCLK1 = 84 MHz (APB1 divider != 1).
+     * PSC=83 → 1 MHz after prescaler. ARR=999 → update at 1 kHz = 1 ms period. */
+    TIM2->PSC  = 83;
+    TIM2->ARR  = 999;
+    TIM2->CNT  = 0;
+    TIM2->EGR  = TIM_EGR_UG;   /* force load of PSC/ARR */
+    TIM2->SR   = 0;             /* clear the UIF set by EGR */
+    TIM2->DIER = TIM_DIER_UIE; /* enable update interrupt */
+    TIM2->CR1  = TIM_CR1_CEN;  /* start counter */
+
+    HAL_NVIC_SetPriority(TIM2_IRQn, TickPriority, 0);
+    HAL_NVIC_EnableIRQ(TIM2_IRQn);
+
+    return HAL_OK;
+}
+
 static void MX_I2C1_Init(void)
 {
     hi2c1.Instance             = I2C1;
