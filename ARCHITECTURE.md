@@ -18,7 +18,7 @@ Firmware for an STM32F401 (Cortex-M4) Pomodoro timer with a monochrome OLED disp
 
 ```
 pomodoro/
-├── main.c                           # Wiring layer — two FreeRTOS tasks, no chip headers
+├── main.c                           # Wiring layer — three FreeRTOS tasks, no chip headers
 │
 ├── hal/
 │   └── hal.h                        # Portable HAL interface (5 functions)
@@ -33,6 +33,10 @@ pomodoro/
 ├── button/
 │   ├── button.h                     # button_event_t, button_cfg_t, API
 │   └── button.c                     # Polling state machine
+│
+├── config/
+│   ├── config_task.h                # config_task_init(), config_task() entry point
+│   └── config_task.c                # Three-step duration edit UI, renders directly to display
 │
 ├── pomodoro/
 │   ├── pomodoro.h                   # State/action types, API
@@ -82,7 +86,7 @@ pomodoro/
 **No file outside `platform/` may include a chip vendor header.**
 **No file outside `osal/` may include an OS-specific header.**
 
-`hal/hal.h` is the hardware boundary: it contains only portable C types and `extern` function declarations. `osal/osal.h` is the OS boundary: opaque handle types (`osal_task_t`, `osal_sem_t`, etc.) and function declarations. Application code (`main.c`, `button/`, `pomodoro/`, `display/`) includes only these two headers and standard C headers.
+`hal/hal.h` is the hardware boundary: it contains only portable C types and `extern` function declarations. `osal/osal.h` is the OS boundary: opaque handle types (`osal_task_t`, `osal_sem_t`, etc.) and function declarations. Application code (`main.c`, `button/`, `config/`, `pomodoro/`, `display/`) includes only these two headers and standard C headers.
 
 ## Component responsibilities
 
@@ -122,9 +126,25 @@ Active-LOW convention: `hal_gpio_read() == 0` means button pressed.
 
 | Event | Trigger |
 |---|---|
-| `BUTTON_EVENT_LONG_PRESS` | Release after ≥ 2000 ms hold |
+| `BUTTON_EVENT_LONG_PRESS` | Release after ≥ 5000 ms hold |
 | `BUTTON_EVENT_DOUBLE_CLICK` | Two releases within 500 ms of each other |
 | `BUTTON_EVENT_CLICK` | Any other release |
+
+### `config/`
+
+Three-step configuration UI task. No chip or OS headers — only `osal/osal.h`, `pomodoro/pomodoro.h`, and `display/display.h`.
+
+`config_task_init(trigger, btn_q, display_sem, in_config)` stores references to the four shared objects owned by `main.c`. `config_task()` is the FreeRTOS entry point: it blocks on `trigger`, sequences three `edit_value()` calls (Focus → Break → Long Break), calls `pomodoro_apply_cfg()`, clears the `g_in_config` flag, and gives `display_sem` to restore normal display operation.
+
+`edit_value()` drives a single parameter step. A 500 ms timeout on `osal_queue_receive()` toggles the blink; `BUTTON_EVENT_CLICK` increments the value (1–60, wraps); `BUTTON_EVENT_DOUBLE_CLICK` confirms and returns.
+
+`render_config()` draws the config screen directly to the display (bypassing `g_display_sem`):
+
+```
+y= 2  font_7x10   "FOCUS TIME" / "BREAK TIME" / "LGBRK TIME"
+y=22  font_11x18  current value in minutes — blank when blink phase is off
+y=50  font_6x8    "CLK:+1min  2xCLK:OK"
+```
 
 ### `pomodoro/`
 
@@ -132,9 +152,11 @@ Pure logic module — no hardware calls, no `hal.h` dependency.
 
 `pomodoro_init(cfg)` sets defaults and starts in `PAUSED` / Focus phase.
 `pomodoro_tick(elapsed_ms)` advances the countdown; returns `POMODORO_ACTION_DISPLAY_UPDATE` when a second elapses or state changes.
-`pomodoro_handle_event(button_event_t)` drives state transitions.
+`pomodoro_handle_event(button_event_t)` drives state transitions (CLICK and LONG_PRESS are handled; LONG_PRESS is intercepted by `task_main` before this function is reached, so it never arrives here in practice).
 
 Getters: `pomodoro_state()`, `pomodoro_current_time()`, `pomodoro_phase_label()`, `pomodoro_cycle_count()`.
+
+Config API: `pomodoro_get_cfg()` returns the current `pomodoro_cfg_t` snapshot; `pomodoro_apply_cfg(cfg)` writes the three duration fields, resets to Focus phase, and transitions to `PAUSED`.
 
 ### `display/`
 
@@ -157,40 +179,59 @@ SSD1306 protocol: control byte `0x00` for commands, `0x40` for data.
 Wiring layer only. Runs before the RTOS scheduler starts:
 
 1. `platform_init()`
-2. `button_init(PIN_BUTTON, cfg)`
+2. `button_init(PIN_BUTTON, cfg)` — `long_press_ms = 5000`
 3. `pomodoro_init(cfg)`
 4. `display_set_cb(display_write_cb)` + `hal_delay_ms(100)` + `display_init()`
 5. Greeting splash (2 s, using `hal_delay_ms` — safe pre-RTOS)
 6. `osal_sem_create(&g_display_sem)` + `osal_sem_give` (primes initial render)
-7. `osal_task_create(task_display, ...)` + `osal_task_create(task_main, ...)`
-8. `osal_start()` — never returns
+7. `osal_sem_create(&g_config_sem)` + `osal_queue_create(&g_btn_queue, sizeof(button_event_t), 4)`
+8. `config_task_init(...)` — binds shared objects to the config task
+9. `osal_task_create(task_display, ...)` + `osal_task_create(task_main, ...)` + `osal_task_create(config_task, ...)`
+10. `osal_start()` — never returns
 
 ## Concurrency model
 
-Two FreeRTOS tasks communicate through a binary semaphore `g_display_sem`:
+Three FreeRTOS tasks and three shared objects:
+
+| Object | Type | Purpose |
+|---|---|---|
+| `g_display_sem` | Binary semaphore | `task_main` → `task_display`: trigger a render |
+| `g_config_sem` | Binary semaphore | `task_main` → `task_config`: enter config mode |
+| `g_btn_queue` | Queue (depth 4) | `task_main` → `task_config`: forward button events during config |
+| `g_in_config` | `volatile uint8_t` | Routing flag: 1 while config is active |
 
 | Task | Priority | Role |
 |---|---|---|
-| `task_main` | 2 (high) | Button polling + pomodoro state machine + alarm LED |
-| `task_display` | 1 (low) | I2C OLED rendering |
+| `task_main` | 2 | Button polling, pomodoro FSM, event routing, alarm LED |
+| `task_config` | 2 | Configuration UI — active only during a config session |
+| `task_display` | 1 | I2C OLED rendering |
 | FreeRTOS idle | 0 | Background |
 
-`task_main` runs every 10 ms: polls the button, calls `pomodoro_tick(elapsed_ms)`, and gives `g_display_sem` when the state machine returns `POMODORO_ACTION_DISPLAY_UPDATE`. It also drives the alarm LED blink (500 ms toggle via `hal_gpio_write`).
+**Normal operation** (`g_in_config == 0`): `task_main` runs every 10 ms, calls `pomodoro_tick()`, and gives `g_display_sem` on `POMODORO_ACTION_DISPLAY_UPDATE`. `BUTTON_EVENT_LONG_PRESS` is intercepted before `pomodoro_handle_event()` — it turns off the LED, sets `g_in_config = 1`, and gives `g_config_sem`.
 
-`task_display` blocks indefinitely on `g_display_sem`. On wake it calls `render()` immediately (covers state transitions, CONFIG, ALARM). While `POMODORO_STATE_RUNNING` it loops with a 1-second delay and a repeated `render()` to show the countdown. When the state leaves RUNNING it exits the inner loop and blocks again.
+**Config session** (`g_in_config == 1`): `task_main` still polls the button every 10 ms but only forwards events to `g_btn_queue`; tick, display, and LED logic are bypassed. `task_config` wakes, runs the three edit steps, calls `pomodoro_apply_cfg()`, clears `g_in_config`, and gives `g_display_sem`. `task_display` remains blocked on `g_display_sem` throughout and never calls `render()` during config — `task_config` writes to the display directly.
 
 ```
+Normal:
 task_main (every 10 ms)              task_display (woken by semaphore)
 ─────────────────────────────────    ─────────────────────────────────────
 pomodoro_tick(elapsed_ms)            osal_sem_take(&g_display_sem, FOREVER)
-  └─ accumulates ms                  render()              ← immediate draw
-  └─ decrements _curr_time
-  └─ returns DISPLAY_UPDATE          while RUNNING:
-       every second                    osal_delay_ms(1000) ← yields CPU
-  └─ osal_sem_give(&g_display_sem)     render()            ← reads latest time
-```
+  └─ returns DISPLAY_UPDATE          render()              ← immediate draw
+  └─ osal_sem_give(&g_display_sem)   while RUNNING:
+                                       osal_delay_ms(1000)
+                                       render()
 
-`task_display` always reads `pomodoro_current_time()` inside `render()`, so it always shows the value that `task_main` has already advanced.
+Config (g_in_config == 1):
+task_main (every 10 ms)              task_config (woken by g_config_sem)
+─────────────────────────────────    ──────────────────────────────────────────
+button_poll()                        osal_sem_take(&g_config_sem, FOREVER)
+  └─ ev → osal_queue_send(btn_q)     edit_value(&focus_min,  "FOCUS TIME")
+                                     edit_value(&break_min,  "BREAK TIME")
+(no tick, no display sem, no LED)    edit_value(&big_brk_min,"LGBRK TIME")
+                                     pomodoro_apply_cfg(cfg)
+                                     g_in_config = 0
+                                     osal_sem_give(&g_display_sem)
+```
 
 ## SysTick / TIM2 timebase
 
@@ -213,29 +254,29 @@ The STM32 HAL timebase is redirected to TIM2. `HAL_InitTick()` is overridden in 
 
 ## State machine
 
+The pomodoro state machine has three states. `LONG_PRESS` is intercepted by `task_main` before reaching `pomodoro_handle_event()` — it triggers `task_config` (see [Concurrency model](#concurrency-model)) and does not appear as a transition in the FSM itself.
+
 ```
-             ┌─────────────────────────────────────────────┐
-             │               PAUSED                        │◄──────────────────┐
-             └──────┬──────────────────────────────────────┘                   │
-                    │ CLICK                      LONG_PRESS (any state)         │
-             ┌──────▼──────────────┐              ────────────────────►         │
-             │      RUNNING        │                     CONFIG                 │
-             └──────┬──────────────┘              ◄──────────────────           │
-                    │ CLICK                     LONG_PRESS (save)               │
-                    │ → PAUSED                  DOUBLE_CLICK (discard)          │
-                    │                                                           │
-                    │ timeout (00:00)                                           │
-             ┌──────▼──────────────┐                                           │
-             │       ALARM         │── CLICK ──────────────────────────────────┘
+             ┌──────────────────────────────────────┐
+             │               PAUSED                 │◄──────────────────┐
+             └──────┬───────────────────────────────┘                   │
+                    │ CLICK                                              │
+             ┌──────▼──────────────┐                                    │
+             │      RUNNING        │── CLICK ──────────────────►PAUSED  │
+             └──────┬──────────────┘                                    │
+                    │ timeout (00:00)                                    │
+             ┌──────▼──────────────┐                                    │
+             │       ALARM         │── CLICK ──────────────────────────┘
              └─────────────────────┘  (advance phase, load next timer)
 ```
 
 | State | Behaviour |
 |---|---|
-| `PAUSED` | Timer frozen. CLICK → RUNNING. LONG_PRESS → CONFIG. |
+| `PAUSED` | Timer frozen. CLICK → RUNNING. |
 | `RUNNING` | `pomodoro_tick` decrements each second. CLICK → PAUSED. Timeout → ALARM. |
 | `ALARM` | Display shows "DONE!". LED blinks at ~1 Hz (`task_main`). CLICK → load next phase → PAUSED. |
-| `CONFIG` | CLICK increments focus duration (+1 min, wraps at 60). LONG_PRESS saves and resets to focus/PAUSED. DOUBLE_CLICK discards and restores previous time. |
+
+LONG_PRESS (≥ 5 s) from any state suspends normal operation and activates `task_config`. On completion, `pomodoro_apply_cfg()` resets to PAUSED / Focus regardless of prior state.
 
 ## Phase and cycle logic
 
@@ -308,7 +349,7 @@ Both default to their current single implementation. To add a new chip, create `
 
 ## Remaining gaps
 
-- `STATE_CONFIG` only edits focus duration. Break and big-break durations are not yet configurable from the UI.
+- `cycles_before_big_break` is not configurable from the UI (fixed at 4 by default).
 - Alarm has no audible output (no buzzer).
 - No low-power sleep mode. RTC wakeup is available in hardware but RTC init is disabled.
 - `render()` in `task_display` reads pomodoro state while `task_main` may be mid-`pomodoro_tick`. Currently safe because `task_main` has higher priority and the read is word-aligned, but a mutex around shared pomodoro state would be more correct.

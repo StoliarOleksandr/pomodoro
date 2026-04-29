@@ -50,7 +50,7 @@ Two hard boundaries keep the project portable:
 |---|---|
 | `hal/hal.h` | `<stdint.h>`, `<stddef.h>` only |
 | `osal/osal.h` | `<stdint.h>`, `<stddef.h>` only |
-| `button/`, `pomodoro/`, `display/` | `hal/hal.h`, `osal/osal.h`, standard C headers |
+| `button/`, `config/`, `pomodoro/`, `display/` | `hal/hal.h`, `osal/osal.h`, standard C headers |
 | `main.c` | All of the above + `platform/<name>/platform.h` |
 | `platform/<name>/` | Anything, including chip HAL headers |
 | `osal/<name>/` | Anything, including RTOS headers |
@@ -93,6 +93,7 @@ No changes to `main.c`, `button/`, `pomodoro/`, `display/`, or any platform code
 - **Display tests**: after any `display/` change, run a full power cycle and visually confirm the timer renders correctly with no corruption.
 - **Button tests**: exercise CLICK, LONG_PRESS (≥ 2 s), and DOUBLE_CLICK (two presses within 500 ms).
 - **RTOS tests**: after any `osal/` or task change, verify that `task_display` wakes on button press, that the countdown updates every second while RUNNING, and that the ALARM LED blinks correctly.
+- **Config tests**: hold B1 for 5 s; step through Focus → Break → Long Break with CLICK increments and DOUBLE_CLICK confirmations; verify the new values are reflected when the timer resumes.
 
 ## Pull request checklist
 
